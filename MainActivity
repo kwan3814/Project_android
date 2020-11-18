@@ -1,0 +1,365 @@
+package com.cookandroid.car_park;
+
+import androidx.annotation.NonNull;
+import androidx.appcompat.app.ActionBar;
+import androidx.appcompat.app.AlertDialog;
+import androidx.appcompat.app.AppCompatActivity;
+
+import android.content.Context;
+import android.content.DialogInterface;
+import android.graphics.Color;
+import android.location.Criteria;
+import android.location.Location;
+import android.location.LocationManager;
+import android.media.Image;
+import android.os.Bundle;
+import android.util.Log;
+import android.view.Menu;
+import android.view.MenuItem;
+import android.widget.ImageView;
+import android.widget.TextView;
+import android.widget.Toast;
+import androidx.appcompat.widget.Toolbar;
+import com.google.android.gms.maps.CameraUpdateFactory;
+import com.google.android.gms.maps.GoogleMap;
+import com.google.android.gms.maps.MapFragment;
+import com.google.android.gms.maps.OnMapReadyCallback;
+import com.google.android.gms.maps.model.BitmapDescriptorFactory;
+import com.google.android.gms.maps.model.CircleOptions;
+import com.google.android.gms.maps.model.GroundOverlayOptions;
+import com.google.android.gms.maps.model.LatLng;
+import com.google.android.gms.maps.model.Marker;
+import com.google.android.gms.maps.model.MarkerOptions;
+import com.google.firebase.database.DataSnapshot;
+import com.google.firebase.database.DatabaseError;
+import com.google.firebase.database.DatabaseReference;
+import com.google.firebase.database.FirebaseDatabase;
+import com.google.firebase.database.ValueEventListener;
+
+import java.text.ParseException;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+
+public class MainActivity extends AppCompatActivity implements OnMapReadyCallback, GoogleMap.OnMarkerClickListener{
+    GoogleMap gMap;
+    MapFragment mapFrag;
+    TextView textView;
+    GroundOverlayOptions videoMark;
+
+    MarkerOptions markerOptions = new MarkerOptions();
+    LatLng start_point;
+
+    //아래 변수는 임시 변수
+    LatLng temp_LL;
+    String name;
+    int total, possesion, empty;
+
+    double Lat , Lng;
+    private ParkingLotInfo[] ParkingLotList = new ParkingLotInfo[10];
+    ArrayList<ParkingLotInfo> markerArray = new ArrayList<ParkingLotInfo>();
+
+    final ArrayList<ParkingLotInfo> PList = new ArrayList<ParkingLotInfo>();
+
+    DatabaseReference mDBReference = null;
+    HashMap<String, Object> childUpdates = null;
+    Map<String, Object> userValue = null;
+
+    ////////////////////////////////////////////////
+
+    public void re_searching(double Lat, double Lng) {
+        this.Lat = Lat;
+        this.Lng = Lng;
+
+        PList.clear();  //리스트 초기화(재검색)
+    }
+
+    public void insertData(boolean flag  , Integer MaxLot , Integer CurLot, String T_Location , String Location , String Name , String aveTime , int CarCount , int Code , int CostCountTime) // 전체 객체를 등록하여 업데이트 하는방식
+    {
+        mDBReference = FirebaseDatabase.getInstance().getReference();
+        childUpdates = new HashMap<>();
+        if(flag){
+            ParkingLotList[0] = new ParkingLotInfo(MaxLot, CurLot, T_Location, Location, Name , aveTime , CarCount , Code , CostCountTime);
+            userValue = ParkingLotList[0].toMap();
+        }
+
+        childUpdates.put("/PLot_info/" + Name, userValue);
+        mDBReference.updateChildren(childUpdates);
+
+    }
+
+    public void ListUpData()
+    {
+        mDBReference = FirebaseDatabase.getInstance().getReference();
+        mDBReference.addValueEventListener(new ValueEventListener() {
+            @Override
+            public void onDataChange(DataSnapshot dataSnapshot) {
+                // This method is called once with the initial value and again
+                // whenever data at this location is updated.
+
+                int i = 0;
+                PList.clear();
+                markerArray.clear();
+
+                for(DataSnapshot postSnapshot: dataSnapshot.getChildren())
+                {
+                    for(DataSnapshot temp: postSnapshot.getChildren())
+                    {
+                        ParkingLotInfo list = temp.getValue(ParkingLotInfo.class);
+
+                        list.setLatLng();
+
+                        Double D = (double)Math.round(CalDistence(list.Lat , list.Lng)) / 1000;
+                        if(D < 2.0)
+                        {
+                            PList.add(list);
+                            Log.d("Database", "registerd: " + PList.get(i).Name + " : " + PList.size());
+
+                            temp_LL = new LatLng(PList.get(i).Lat, PList.get(i).Lng);
+                            name = PList.get(i).Name;
+                            total = PList.get(i).MaxLot;
+                            possesion = PList.get(i).CurLot;
+                            empty = total - possesion;
+
+                            markerOptions.position(temp_LL).title(name).snippet("남은 자리 : " + empty);
+                            gMap.addMarker(markerOptions);
+
+                            markerArray.add(list);
+                            i++;
+                        }
+
+                    }
+                }
+            }
+
+            @Override
+            public void onCancelled(DatabaseError error) {
+                // Failed to read value
+                Log.w("Database", "Failed to read value.", error.toException());
+            }
+        });
+    }
+
+    public double CalDistence(double Lat1 , double Lng1)
+    {
+        // 사용자 위치를 기반으로 주변의 주차장 리스트 검색 Lat , Lng  - 위도 , 경도
+        double distance;
+
+        Location locationA = new Location("point A");
+        locationA.setLatitude(Lat);
+        locationA.setLongitude(Lng);
+
+        Location locationB = new Location("point B");
+        locationB.setLatitude(Lat1);
+        locationB.setLongitude(Lng1);
+
+        distance = locationA.distanceTo(locationB);
+
+        Log.d("Database", "d : " + distance);
+
+        return distance;
+
+    }
+    ////////////////////////////////////////////////
+
+    @Override
+    protected void onCreate(Bundle savedInstanceState) {
+        super.onCreate(savedInstanceState);
+        setContentView(R.layout.activity_main);
+
+        mapFrag = (MapFragment)getFragmentManager().findFragmentById(R.id.map);
+        mapFrag.getMapAsync(this);
+
+        Toolbar toolbar = (Toolbar)findViewById(R.id.toolbar);
+        setSupportActionBar(toolbar);
+
+        ActionBar actionBar = getSupportActionBar();
+        actionBar.setDisplayShowCustomEnabled(true);
+        actionBar.setDisplayShowTitleEnabled(true);
+        actionBar.setDisplayHomeAsUpEnabled(true);
+        actionBar.setHomeAsUpIndicator(R.drawable.cl3);
+        actionBar.setTitle("");
+
+        start_point = new LatLng(36.735859, 127.074863);
+        Lat = start_point.latitude;
+        Lng = start_point.longitude;
+
+        ListUpData();
+    }
+
+    @Override
+    public void onMapReady(GoogleMap map) {
+        gMap = map;
+        //gps 를 통해 사용자 현재 위치 추적 후 그곳으로 화면 설정하기
+        gMap.moveCamera(CameraUpdateFactory.newLatLngZoom(start_point,15));
+        gMap.getUiSettings().setZoomControlsEnabled(true);
+        gMap.setOnMarkerClickListener(this);
+
+        MarkerOptions startMarker = new MarkerOptions();
+        startMarker.position(start_point).title("내 위치").
+                icon(BitmapDescriptorFactory.defaultMarker(BitmapDescriptorFactory.HUE_ORANGE));
+        gMap.addMarker(startMarker);
+
+        // 반경 1KM원
+        CircleOptions circle1KM = new CircleOptions().center(new LatLng(Lat,Lng)) //원점
+                .radius(2000)      //반지름 단위 : m
+                .strokeWidth(0f)  //선너비 0f : 선없음
+                .fillColor(Color.parseColor("#880000ff")); //배경색
+
+        //원추가
+        gMap.addCircle(circle1KM);
+
+        gMap.setOnMapClickListener(new GoogleMap.OnMapClickListener() {
+            @Override
+            public void onMapClick(LatLng point) {
+                //Toast.makeText(MainActivity.this, point.toString(), Toast.LENGTH_SHORT).show();
+                Lat = point.latitude;
+                Lng = point.longitude;
+                gMap.clear();
+
+                ListUpData();
+
+                // 반경 1KM원
+                CircleOptions circle1KM = new CircleOptions().center(point) //원점
+                        .radius(2000)      //반지름 단위 : m
+                        .strokeWidth(0f)  //선너비 0f : 선없음
+                        .fillColor(Color.parseColor("#880000ff")); //배경색
+
+                //원추가
+                gMap.addCircle(circle1KM);
+            }
+        });
+    }
+
+    @Override
+    public boolean onMarkerClick(Marker marker) {
+        double state;
+        for(int i = 0;i<markerArray.size();i++) {
+            if(markerArray.get(i).Name.equals(marker.getTitle())) {
+                textView = (TextView)findViewById(R.id.park_name);
+                textView.setText(marker.getTitle());
+                textView = (TextView)findViewById(R.id.park_location);
+                textView.setText(markerArray.get(i).T_Location);
+                ImageView imgView = (ImageView)findViewById(R.id.car_icon);
+                imgView.setImageResource(R.drawable.car_icon1);
+                textView = (TextView)findViewById(R.id.park_car_cnt);
+                textView.setText(markerArray.get(i).CurLot + "대 주차중!");
+                textView = (TextView)findViewById(R.id.park_car_state);
+                state = (double)markerArray.get(i).CurLot / (double)markerArray.get(i).MaxLot;
+                if(state > 0.80) {
+                    textView.setText("포화");
+                    textView.setTextColor(Color.parseColor("#ff0000"));
+                }
+                else if(state > 0.60){
+                    textView.setText("혼잡");
+                    textView.setTextColor(Color.parseColor("#ff7f00"));
+                }
+                else if(state > 0.40){
+                    textView.setText("양호");
+                    textView.setTextColor(Color.parseColor("#008000"));
+                }
+                else {
+                    textView.setText("쾌적");
+                    textView.setTextColor(Color.parseColor("#0080ff"));
+                }
+                imgView = (ImageView)findViewById(R.id.coin_icon);
+                imgView.setImageResource(R.drawable.coin1);
+                textView = (TextView)findViewById(R.id.park_cost);
+                if(markerArray.get(i).Cost == 0)    textView.setText("주차비 무료!");
+                else textView.setText(markerArray.get(i).CostCountTime + "분마다 " +
+                        markerArray.get(i).Cost + "원");
+                textView = (TextView)findViewById(R.id.park_avg_time);
+                textView.setText("평균 주차 시간 : " + markerArray.get(i).aveTime);
+
+                break;
+            }
+        }
+
+        return false;
+    }
+
+    public boolean onCreateOptionsMenu(Menu menu) {
+        super.onCreateOptionsMenu(menu);
+        getMenuInflater().inflate(R.menu.googlemenu, menu);
+
+        return true;
+    }
+
+    @Override
+    public boolean onOptionsItemSelected(@NonNull MenuItem item) {
+        switch (item.getItemId()) {
+            case R.id.mylocation:
+                return true;
+            case R.id.satellite:
+                gMap.setMapType(GoogleMap.MAP_TYPE_HYBRID);
+                return true;
+            case R.id.normal:
+                gMap.setMapType(GoogleMap.MAP_TYPE_NORMAL);
+                return true;
+            case android.R.id.home :
+                AlertDialog.Builder builder = new AlertDialog.Builder(this);
+                builder.setTitle("개발자 소개").setMessage("호서대학교 컴퓨터공학과\n" +
+                        "한강 206팀");
+                AlertDialog alertDialog = builder.create();
+                alertDialog.show();
+                return true;
+        }
+        return false;
+    }
+}
+
+////////////////////////////////////////////////////
+
+class ParkingLotInfo
+{
+    public String Name ;
+    public String Location;
+    public String T_Location;
+    public int MaxLot , CurLot;
+    public double Lat,Lng;
+    public String aveTime;
+    public int CarCount;
+    public int Cost;
+    public int CostCountTime;
+
+    public ParkingLotInfo()
+    {
+
+    }
+
+
+    public ParkingLotInfo (Integer MaxLot , Integer CurLot, String T_Location , String Location , String Name , String aveTime , int CarCount , int Cost , int CostCountTime)
+    {
+        this.T_Location = T_Location;
+        this.Name = Name;
+        this.Location = Location;
+        this.MaxLot = MaxLot;
+        this.CurLot = CurLot;
+        this.aveTime = aveTime;
+        this.CarCount = CarCount;
+        this.Cost = Cost;
+        this.CostCountTime = CostCountTime;
+    }
+
+    public void setLatLng()
+    {
+        String temp[] = Location.split(",");
+        Lat = Double.parseDouble(temp[0]);
+        Lng = Double.parseDouble(temp[1]);
+    }
+
+    public Map<String, Object> toMap() {
+        HashMap<String, Object> result = new HashMap<>();
+        result.put("Name", Name);
+        result.put("Location", Location);
+        result.put("Layer", T_Location);
+        result.put("MaxLot", MaxLot);
+        result.put("CurLot" , CurLot);
+        result.put("aveTime" , aveTime);
+        result.put("CarCount" , CarCount);
+        result.put("Cost" , Cost);
+        result.put("CostCountTime" , CostCountTime);
+        return result;
+    }
+}
